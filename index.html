@@ -4264,63 +4264,84 @@ function addMark(x,y,z,h,c){dm.position.set(x,y+.05,z);dm.rotation.set(0,h,0);dm
 const S={x:0,y:0,z:0,h:0,vx:0,vz:0,vy:0,pit:0,rol:0,steer:0,air:false,vmin:0,idx:0,cum:0,vfp:0,mud:0,mk:0,camA:0,shake:0};
 window.__S=S;window.__phys=(dt,k)=>phys(dt,k);window.__state=v=>{if(v)state=v;return state};window.__pts=()=>pts;window.__setwx=v=>{wx=v};window.__settc=v=>{TC=v};let state='menu',t=0,cd=3,lap=1,lapStart=0,laps=[],surf=SURF.asf,bigT=0,wx=STG.wx,ti=STG.ti,cm=0,clk=0,wT=0,rfrT=0;
 const keys={up:0,down:0,left:0,right:0,hb:0,st:null},NO={up:0,down:0,left:0,right:0,hb:0,st:null},G=[0,0,0,0];
-// Xbox / generisk handkontroll – Standard Gamepad-mappning
+// ===== Xbox / handkontroll (Standard Gamepad API) =====
 let gpId=null,gpSt=0,gpThr=0,gpBrk=0,gpHb=0,gpActive=false,gpCamLatch=0,gpMenuLatch=0;
-function _btn(p,i){const b=p.buttons&&p.buttons[i];return b?(b.value!==undefined?b.value:(b.pressed?1:0)):0}
-function _pressed(p,i){const b=p.buttons&&p.buttons[i];return !!(b&&(b.pressed||b.value>0.5))}
+function _btn(p,i){
+ const b=p.buttons&&p.buttons[i];
+ if(!b)return 0;
+ if(typeof b.value==='number')return b.value;
+ return b.pressed?1:0;
+}
+function _pressed(p,i){return _btn(p,i)>0.45}
 function pollPad(){
  gpSt=0;gpThr=0;gpBrk=0;gpHb=0;gpActive=false;
  let pads;
  try{pads=navigator.getGamepads?navigator.getGamepads():null}catch(e){return}
  if(!pads)return;
  for(let i=0;i<pads.length;i++){
-  const p=pads[i];if(!p||!p.connected)continue;
+  const p=pads[i];
+  if(!p||!p.connected)continue;
   gpActive=true;gpId=i;
-  // Vänster stick X (axis 0) – död-zon + kurva
-  let st=p.axes&&p.axes.length?p.axes[0]:0;
-  if(typeof st!=='number'||isNaN(st))st=0;
-  const dz=.14;if(Math.abs(st)<dz)st=0;else st=Math.sign(st)*Math.pow((Math.abs(st)-dz)/(1-dz),1.15);
-  // D-pad vänster/höger som backup
-  if(_pressed(p,14))st=-1;if(_pressed(p,15))st=1;
-  gpSt=clamp(st,-1,1);
-  // Triggers: Standard = buttons 6 (LT) / 7 (RT) med analog value
+  // --- Styrning: vänster stick X ---
+  let st=0;
+  if(p.axes&&p.axes.length>0&&typeof p.axes[0]==='number')st=p.axes[0];
+  const dz=0.12;
+  if(Math.abs(st)<dz)st=0;
+  else st=Math.sign(st)*Math.pow((Math.abs(st)-dz)/(1-dz),1.1);
+  // D-pad
+  if(_pressed(p,14))st=-1;
+  if(_pressed(p,15))st=1;
+  gpSt=Math.max(-1,Math.min(1,st));
+  // --- Gas / broms: RT = 7, LT = 6 ---
   let lt=_btn(p,6), rt=_btn(p,7);
-  // Vissa drivrutiner mappar triggers till axes 4/5
-  if(lt<.01&&rt<.01&&p.axes&&p.axes.length>=6){
-   const a4=p.axes[4],a5=p.axes[5];
-   if(typeof a4==='number'&&a4>-0.95)lt=Math.max(0,Math.min(1,(a4+1)*.5));
-   if(typeof a5==='number'&&a5>-0.95)rt=Math.max(0,Math.min(1,(a5+1)*.5));
+  // Fallback: vissa Xbox-drivrutiner (axes 4/5 eller 2/3 som -1..1)
+  if(lt<0.02&&rt<0.02&&p.axes){
+   if(p.axes.length>=6){
+    if(typeof p.axes[4]==='number')lt=Math.max(0,Math.min(1,(p.axes[4]+1)*0.5));
+    if(typeof p.axes[5]==='number')rt=Math.max(0,Math.min(1,(p.axes[5]+1)*0.5));
+   } else if(p.axes.length>=4){
+    // Firefox / vissa Windows-drivrutiner
+    if(typeof p.axes[2]==='number'&&p.axes[2]>-0.9)lt=Math.max(lt,(p.axes[2]+1)*0.5);
+    if(typeof p.axes[3]==='number'&&p.axes[3]>-0.9)rt=Math.max(rt,(p.axes[3]+1)*0.5);
+   }
   }
   if(isNaN(lt))lt=0;if(isNaN(rt))rt=0;
-  gpThr=Math.max(0,Math.min(1,rt));gpBrk=Math.max(0,Math.min(1,lt));
-  // A=0 handbroms, B=1 broms, X=2 gas, Y=3 kamera
-  if(_pressed(p,0))gpHb=1;
-  if(_pressed(p,1))gpBrk=Math.max(gpBrk,1);
+  gpThr=Math.max(0,Math.min(1,rt));
+  gpBrk=Math.max(0,Math.min(1,lt));
+  // Knappar: A=handbroms, B=broms, X=gas, RB=handbroms
+  if(_pressed(p,0)||_pressed(p,5))gpHb=1;
+  if(_pressed(p,1))gpBrk=1;
   if(_pressed(p,2))gpThr=Math.max(gpThr,1);
-  // RB (5) också handbroms – vanligt i racing
-  if(_pressed(p,5))gpHb=1;
-  // Meny-knapp (9) / View (8)
+  // Meny
   if(_pressed(p,9)||_pressed(p,8)){
    if(!gpMenuLatch){gpMenuLatch=1;if(typeof state!=='undefined'&&state!=='menu')try{openMenu('home')}catch(e){}}
   }else gpMenuLatch=0;
-  // Y (3) eller D-pad upp (12) = byt kamera
+  // Kamera: Y eller D-pad upp
   if(_pressed(p,3)||_pressed(p,12)){
-   if(!gpCamLatch){gpCamLatch=1;try{setCam(cm+1)}catch(e){}}
+   if(!gpCamLatch){gpCamLatch=1;try{setCam((cm+1)%NCAM)}catch(e){}}
   }else gpCamLatch=0;
   break;
  }
 }
+let gpLastInput=0;
 function applyPad(k){
  if(!gpActive)return k;
+ const now=performance.now();
+ const using=Math.abs(gpSt)>0.02||gpThr>0.02||gpBrk>0.02||gpHb;
+ if(using)gpLastInput=now;
+ // Bara ta över om kontrollen använts nyligen (annars fungerar tangentbord parallellt)
+ if(now-gpLastInput>2000)return k;
+ // Analog styrning
  k.st=gpSt;
  k.left=0;k.right=0;
- if(gpThr>.02){k.up=1;k._thr=gpThr}else{k._thr=0;}
- if(gpBrk>.02){k.down=1;k._brk=gpBrk}else{k._brk=0}
+ // Analog gas/broms
+ if(gpThr>0.02){k.up=1;k._thr=gpThr}else{k._thr=0;k.up=0}
+ if(gpBrk>0.02){k.down=1;k._brk=gpBrk}else{k._brk=0;k.down=0}
  if(gpHb)k.hb=1;
  return k;
 }
 try{
- window.addEventListener('gamepadconnected',function(e){gpId=e.gamepad.index;gpActive=true});
+ window.addEventListener('gamepadconnected',function(e){gpId=e.gamepad.index;gpActive=true;try{flash('Kontroll ansluten',1.2)}catch(err){}});
  window.addEventListener('gamepaddisconnected',function(e){if(gpId===e.gamepad.index){gpId=null;gpActive=false}});
 }catch(e){}
 
@@ -4835,20 +4856,46 @@ function drawGauge(){const W=gc.width,c=W/2,r=W*.44,g=gx,rp=SND.rpm,kmh=Math.rou
 // ===== Indata och start =====
 function resize(){const w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;R.setSize(w,h,false);rt.setSize(Math.max(2,Math.floor(w*R.getPixelRatio())),Math.max(2,Math.floor(h*R.getPixelRatio())));cam.aspect=w/h;cam.updateProjectionMatrix();PQ.uniforms.px.value.set(1/w,1/h);wsc.width=w;wsc.height=h}
 new ResizeObserver(resize).observe(cv);resize();
-const map={arrowup:'up',w:'up',arrowdown:'down',s:'down',arrowleft:'left',a:'left',arrowright:'right',d:'right',' ':'hb'};
+// Tangentbord – WASD + pilar + mellanslag/shift handbroms
+const map={
+ arrowup:'up',w:'up',
+ arrowdown:'down',s:'down',
+ arrowleft:'left',a:'left',
+ arrowright:'right',d:'right',
+ ' ':'hb',shift:'hb'
+};
+function keyName(e){
+ if(e.code==='Space')return ' ';
+ if(e.key==='Shift'||e.code==='ShiftLeft'||e.code==='ShiftRight')return 'shift';
+ return e.key.toLowerCase();
+}
 addEventListener('keydown',e=>{
  if(e.ctrlKey||e.metaKey||e.altKey)return;
- if(state==='menu'&&!MENU.hidden){if(e.target.tagName==='BUTTON'&&(e.key==='Enter'||e.key===' '))return;if(e.key==='ArrowLeft'){e.preventDefault();step(-1)}else if(e.key==='ArrowRight'){e.preventDefault();step(1)}else if(e.key==='Enter'){e.preventDefault();if(scr==='home')show('country');else next()}else if(e.key==='Escape'||e.key==='Backspace'){e.preventDefault();if(scr!=='home')back()}return}
+ const kn=keyName(e);
+ // Meny-navigering
+ if(state==='menu'&&!MENU.hidden){
+  if(e.target.tagName==='BUTTON'&&(e.key==='Enter'||e.key===' '))return;
+  if(e.key==='ArrowLeft'){e.preventDefault();step(-1);return}
+  if(e.key==='ArrowRight'){e.preventDefault();step(1);return}
+  if(e.key==='Enter'){e.preventDefault();if(scr==='home')show('country');else next();return}
+  if(e.key==='Escape'||e.key==='Backspace'){e.preventDefault();if(scr!=='home')back();return}
+  return;
+ }
  if(e.key==='Escape'&&state!=='menu'){openMenu('home');return}
- const k=map[e.key.toLowerCase()];
- if(k){e.preventDefault();keys[k]=1}
- else if(e.key.toLowerCase()==='c')setCam(cm+1);
- else if(e.key.toLowerCase()==='v')setCam(cm-1);
- else if(e.key.toLowerCase()==='m')sndToggle();
- else if(e.key.toLowerCase()==='h'){tcSet(!TC);flash('Körhjälp '+(TC?'på':'av'),1.2)}
+ const action=map[kn];
+ if(action){e.preventDefault();keys[action]=1;return}
+ const kl=e.key.toLowerCase();
+ if(kl==='c'){e.preventDefault();setCam(cm+1)}
+ else if(kl==='v'){e.preventDefault();setCam(cm-1+NCAM)}
+ else if(kl==='m'){e.preventDefault();sndToggle()}
+ else if(kl==='h'){e.preventDefault();tcSet(!TC);flash('Körhjälp '+(TC?'på':'av'),1.2)}
  else if(/^[0-9]$/.test(e.key)){const n=e.key==='0'?9:+e.key-1;if(n<NCAM)setCam(n)}
- else if(e.key==='Enter'&&e.target.tagName!=='BUTTON'&&(state==='ready'||state==='done'))start()});
-addEventListener('keyup',e=>{const k=map[e.key.toLowerCase()];if(k)keys[k]=0});
+ else if(e.key==='Enter'&&e.target.tagName!=='BUTTON'&&(state==='ready'||state==='done'))start();
+});
+addEventListener('keyup',e=>{
+ const action=map[keyName(e)];
+ if(action){e.preventDefault();keys[action]=0}
+});
 addEventListener('blur',()=>{for(const k in keys)keys[k]=0});
 document.querySelectorAll('[data-k]').forEach(b=>{const k=b.dataset.k,off=()=>{keys[k]=0};
  b.addEventListener('pointerdown',e=>{e.preventDefault();keys[k]=1;if(b.setPointerCapture)b.setPointerCapture(e.pointerId)});
@@ -4919,7 +4966,7 @@ function show(s){scr=s;MENU.classList.toggle('clear',s==='car');$('mback').hidde
   $('mstats').innerHTML='<div><small>Effekt</small>'+I.hk+' hk'+bar(I.hk/350)+'</div><div><small>Vikt</small>'+I.kg+' kg'+bar((1600-I.kg)/500)+'</div><div><small>Toppfart</small>'+I.top+' km/h'+bar(I.top/200)+'</div><div><small>0–100</small>'+I.acc.toFixed(1).replace('.',',')+' s'+bar((9-I.acc)/5)+'</div><div><small>Drivning</small>'+(id==='focus'?'4WD':'RWD')+bar(id==='focus'?1:.6)+'</div>';
   $('mtc').textContent='Körhjälp: '+(TC?'På':'Av');nx.textContent=garage?'Klar ›':'Kör ›'}
  else if(s==='set'){$('mtitle').innerHTML='Inställningar';
-  MB.innerHTML='<div class="setl"><button data-m="snd"><span>Ljud</span><em>'+(SND.on?'På':'Av')+'</em></button><button data-m="tc"><span>Körhjälp (antispinn och stabilitet)</span><em>'+(TC?'På':'Av')+'</em></button><button data-m="qual"><span>Grafik</span><em>'+QN[QUAL]+'</em></button><button data-m="cam"><span>Kamera vid start</span><em>'+CAMN[cm]+'</em></button><p>'+$('hint').textContent+'</p><p style="opacity:.7;font-size:.95rem">Xbox-kontroll: vänster stick = styrning, RT = gas, LT = broms, A = handbroms, Y/D-pad = kamera</p></div>'}
+  MB.innerHTML='<div class="setl"><button data-m="snd"><span>Ljud</span><em>'+(SND.on?'På':'Av')+'</em></button><button data-m="tc"><span>Körhjälp (antispinn och stabilitet)</span><em>'+(TC?'På':'Av')+'</em></button><button data-m="qual"><span>Grafik</span><em>'+QN[QUAL]+'</em></button><button data-m="cam"><span>Kamera vid start</span><em>'+CAMN[cm]+'</em></button><p>'+$('hint').textContent+'</p><p style="opacity:.7;font-size:.95rem">Tangentbord: WASD/pilar, mellanslag=handbroms. Xbox: stick=styr, RT=gas, LT=broms, A/RB=handbroms, Y=kamera</p></div>'}
  MB.scrollTop=0}
 function step(d){if(scr==='country'){ciX=(ciX+d+COUNTRIES.length)%COUNTRIES.length;show('country')}
  else if(scr==='stage'){const L=STAGES.filter(s=>s.c===pick.c);pick=L[(L.indexOf(pick)+d+L.length)%L.length];wx=pick.wx;ti=pick.ti;applyEnv();show('stage')}
