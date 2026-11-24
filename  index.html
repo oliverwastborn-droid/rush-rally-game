@@ -1,6 +1,10 @@
 <!doctype html>
 <html lang="sv">
-<head>
+<head><script>
+  window.onerror = function(msg, url, line) {
+    document.body.innerHTML = '<div style="padding:20px; font-family:sans-serif; background:white; color:red; font-size:18px;"><h2>Ett fel uppstod!</h2><p><b>Meddelande:</b> ' + msg + '</p><p><b>Rad:</b> ' + line + '</p></div>';
+  };
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Rush Rally Demo 3D</title>
